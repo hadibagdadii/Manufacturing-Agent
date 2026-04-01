@@ -15,7 +15,7 @@ OLLAMA_BASE_URL = "http://localhost:11434"
 MODEL_NAME = "llama3.1:8b"
 
 # Processing settings
-MAX_FILES_PER_RUN = 10  # Start with just 10 for testing
+MAX_FILES_PER_RUN = 1000  # Production limit (increase if needed)
 BATCH_SIZE = 100
 
 # Logging

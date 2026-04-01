@@ -77,14 +77,14 @@ class SafeTools:
         self.conn.commit()
         logger.info("✓ Database initialized")
     
-    def list_excel_files(self, max_files: int = MAX_FILES_PER_RUN) -> List[Dict]:
+    def list_excel_files(self, max_files: int = None) -> List[Dict]:
         """
         Tool: List Excel files in directory structure
-        ONLY processes 1.0_Lam folder and files starting with 'TP'
+        RECURSIVE search for ALL TP*.xlsx files at any depth
         """
         if max_files is None:
             max_files = MAX_FILES_PER_RUN
-
+        
         files = []
         count = 0
         
@@ -100,39 +100,41 @@ class SafeTools:
             logger.error(f"Target folder does not exist: {client_path}")
             return []
         
-        logger.info(f"Scanning client folder: {target_client}")
+        logger.info(f"Scanning client folder: {target_client} (recursive)")
         
-        # Traverse: Model -> Serial -> Excel
-        for model_folder in client_path.iterdir():
-            if not model_folder.is_dir():
-                continue
-            
-            for serial_folder in model_folder.iterdir():
-                if not serial_folder.is_dir():
+        # RECURSIVE search for all TP*.xlsx and TP*.xls files
+        for pattern in ['TP*.xlsx', 'TP*.xls']:
+            for excel_file in client_path.rglob(pattern):
+                if not excel_file.is_file():
                     continue
                 
-                # Find Excel files starting with "TP"
-                excel_files = []
-                for pattern in ['TP*.xls', 'TP*.xlsx']:
-                    excel_files.extend(list(serial_folder.glob(pattern)))
+                # Get relative path from client folder
+                relative_path = excel_file.relative_to(client_path)
+                path_parts = relative_path.parts
                 
-                for excel_file in excel_files:
-                    files.append({
-                        'path': str(excel_file),
-                        'client': target_client,
-                        'model': model_folder.name,
-                        'serial': serial_folder.name,
-                        'filename': excel_file.name
-                    })
-                    count += 1
-                    if count >= 10:  # HARD LIMIT FOR TESTING
-                        logger.info(f"✓ Reached limit of 10 files")
-                        return files
+                # Extract model and serial from path
+                # Use parent folder as "serial" and grandparent as "model"
+                if len(path_parts) >= 2:
+                    model_name = path_parts[0]  # First folder under 1.0_Lam
+                    serial_name = path_parts[-2]  # Parent folder of the file
+                else:
+                    model_name = "Unknown"
+                    serial_name = excel_file.parent.name
+                
+                files.append({
+                    'path': str(excel_file),
+                    'client': target_client,
+                    'model': model_name,
+                    'serial': serial_name,
+                    'filename': excel_file.name
+                })
+                count += 1
+                
+                if count >= max_files:
+                    logger.info(f"✓ Reached file limit: {max_files}")
+                    return files
         
-        if count >= 10:
-            logger.info(f"Reached test limit: returning first 10 files")
-        else:
-            logger.info(f"Found {len(files)} TP*.xlsx files")
+        logger.info(f"✓ Found {len(files)} TP*.xlsx/xls files (recursive search)")
         return files
     
     def read_excel_structure(self, file_path: str, sheet_name: Optional[str] = None) -> Dict:
