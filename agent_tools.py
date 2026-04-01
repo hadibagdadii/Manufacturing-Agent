@@ -246,15 +246,24 @@ class SafeTools:
             result['assembler'] = get_value(extraction_plan.get('assembler_column'))
             result['bench_serial'] = get_value(extraction_plan.get('bench_serial_column'))
             
-            # Extract other serial numbers
+            # Extract other serial numbers - FIX FOR NESTED LIST BUG
             other_serial_cols = extraction_plan.get('other_serial_columns', [])
-
-            # Flatten if LLM returned nested list
-            if other_serial_cols and isinstance(other_serial_cols[0], list):
-                other_serial_cols = other_serial_cols[0]
-
+            
+            # DEFENSIVE: Handle if it's None or not a list
+            if not other_serial_cols:
+                other_serial_cols = []
+            elif not isinstance(other_serial_cols, list):
+                # If it's a single string, wrap it in a list
+                other_serial_cols = [other_serial_cols]
+            
+            # DEFENSIVE: Flatten if LLM returned nested list [[...]]
+            if other_serial_cols and len(other_serial_cols) > 0:
+                if isinstance(other_serial_cols[0], list):
+                    other_serial_cols = other_serial_cols[0]
+            
+            # DEFENSIVE: Process each column
             for col in other_serial_cols:
-                # Skip if col is not a string (defensive programming)
+                # Skip if col is not a string
                 if not isinstance(col, str):
                     continue
                     
