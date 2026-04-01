@@ -192,21 +192,6 @@ class SafeTools:
     ) -> Dict:
         """
         Tool: Extract manufacturing test data based on LLM's extraction plan
-        
-        Args:
-            file_path: Path to Excel file
-            extraction_plan: {
-                'sheet_name': 'All_Data',
-                'part_number_column': 'P/N',
-                'serial_number_column': 'Serial Number',
-                'description_column': 'Description',
-                'customer_part_number_column': 'Customer P/N',
-                'test_date_column': 'Test Date',
-                'test_operator_column': 'Test Operator',
-                'assembler_column': 'Assembler',
-                'bench_serial_column': 'Bench S/N',
-                'other_serial_columns': ['Component S/N', 'Module SN']
-            }
         """
         try:
             sheet_name = extraction_plan.get('sheet_name')
@@ -246,33 +231,48 @@ class SafeTools:
             result['assembler'] = get_value(extraction_plan.get('assembler_column'))
             result['bench_serial'] = get_value(extraction_plan.get('bench_serial_column'))
             
-            # Extract other serial numbers - FIX FOR NESTED LIST BUG
-            other_serial_cols = extraction_plan.get('other_serial_columns', [])
-            
-            # DEFENSIVE: Handle if it's None or not a list
-            if not other_serial_cols:
-                other_serial_cols = []
-            elif not isinstance(other_serial_cols, list):
-                # If it's a single string, wrap it in a list
-                other_serial_cols = [other_serial_cols]
-            
-            # DEFENSIVE: Flatten if LLM returned nested list [[...]]
-            if other_serial_cols and len(other_serial_cols) > 0:
-                if isinstance(other_serial_cols[0], list):
-                    other_serial_cols = other_serial_cols[0]
-            
-            # DEFENSIVE: Process each column
-            for col in other_serial_cols:
-                # Skip if col is not a string
-                if not isinstance(col, str):
-                    continue
-                    
-                val = get_value(col)
-                if val:
-                    result['other_serials'].append({
-                        'column': col,
-                        'value': val
-                    })
+            # Extract other serial numbers - ULTRA DEFENSIVE
+            try:
+                other_serial_cols = extraction_plan.get('other_serial_columns', [])
+                
+                # Handle None
+                if other_serial_cols is None:
+                    other_serial_cols = []
+                
+                # Handle non-list (convert to list)
+                if not isinstance(other_serial_cols, list):
+                    other_serial_cols = [other_serial_cols]
+                
+                # Flatten nested lists recursively
+                def flatten_list(nested_list):
+                    flat = []
+                    for item in nested_list:
+                        if isinstance(item, list):
+                            flat.extend(flatten_list(item))
+                        elif isinstance(item, str):
+                            flat.append(item)
+                        # Skip anything that's not a string or list
+                    return flat
+                
+                other_serial_cols = flatten_list(other_serial_cols)
+                
+                # Process each column
+                for col in other_serial_cols:
+                    if not isinstance(col, str):
+                        continue  # Skip non-strings
+                        
+                    val = get_value(col)
+                    if val:
+                        # Make absolutely sure we're appending a dict
+                        result['other_serials'].append({
+                            'column': str(col),
+                            'value': str(val)
+                        })
+                        
+            except Exception as serial_error:
+                # Log but don't fail the whole extraction
+                logger.warning(f"   ⚠️ Error processing other_serial_columns: {serial_error}")
+                result['other_serials'] = []
             
             return {
                 'status': 'success',
@@ -280,6 +280,8 @@ class SafeTools:
             }
             
         except Exception as e:
+            import traceback
+            logger.error(f"Extraction error: {traceback.format_exc()}")
             return {
                 'status': 'error',
                 'error': str(e)[:200]

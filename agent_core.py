@@ -220,21 +220,30 @@ Return ONLY this JSON, no explanation:
     def extract_data_step(self, state: AgentState) -> AgentState:
         """Extract components based on plan"""
         
-        result = self.tools.extract_manufacturing_data(
-            file_path=state['current_file']['path'],
-            extraction_plan=state['extraction_plan']
-        )
-        
-        if result['status'] == 'success':
-            state['components'] = result['data']
-            state['status'] = 'extraction_complete'
-            logger.info(f"   ✓ Extracted manufacturing data")
-        else:
-            # Truncate error message to prevent MemoryError
-            error_msg = str(result.get('error', 'Unknown error'))[:200]
-            logger.error(f"   ❌ Extraction failed: {error_msg}")
+        try:
+            result = self.tools.extract_manufacturing_data(
+                file_path=state['current_file']['path'],
+                extraction_plan=state['extraction_plan']
+            )
+            
+            if result['status'] == 'success':
+                state['components'] = result['data']
+                state['status'] = 'extraction_complete'
+                logger.info(f"   ✓ Extracted manufacturing data")
+            else:
+                # Truncate error message to prevent MemoryError
+                error_msg = str(result.get('error', 'Unknown error'))[:200]
+                logger.error(f"   ❌ Extraction failed: {error_msg}")
+                state['status'] = 'extraction_error'
+                state['errors'].append(f"{state['current_file']['filename']}: {error_msg}")
+                
+        except Exception as e:
+            import traceback
+            logger.error(f"   ❌ Extraction exception: {str(e)}")
+            logger.error(f"   Traceback: {traceback.format_exc()}")
+            logger.error(f"   Extraction plan: {state['extraction_plan']}")
             state['status'] = 'extraction_error'
-            state['errors'].append(f"{state['current_file']['filename']}: {error_msg}")
+            state['errors'].append(f"{state['current_file']['filename']}: {str(e)[:200]}")
         
         return state
     
