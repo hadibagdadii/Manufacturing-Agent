@@ -248,7 +248,16 @@ class SafeTools:
             
             # Extract other serial numbers
             other_serial_cols = extraction_plan.get('other_serial_columns', [])
+
+            # Flatten if LLM returned nested list
+            if other_serial_cols and isinstance(other_serial_cols[0], list):
+                other_serial_cols = other_serial_cols[0]
+
             for col in other_serial_cols:
+                # Skip if col is not a string (defensive programming)
+                if not isinstance(col, str):
+                    continue
+                    
                 val = get_value(col)
                 if val:
                     result['other_serials'].append({
