@@ -29,11 +29,13 @@ def check_ollama():
             print("✓ Ollama is running")
             print(f"  Available models: {', '.join(model_names)}")
             
-            # Check for recommended model
-            has_llama = any('llama3.1' in m for m in model_names)
-            if not has_llama:
-                print("\n⚠️  Warning: llama3.1:8b not found")
-                print("   Install with: ollama pull llama3.1:8b")
+            # Check if the configured model is available
+            from config import MODEL_NAME
+            model_base = MODEL_NAME.split(':')[0]  # Extract base name (e.g., 'qwen2.5' from 'qwen2.5:7b')
+            has_model = any(model_base in m for m in model_names)
+            if not has_model:
+                print(f"\n⚠️  Warning: {MODEL_NAME} not found")
+                print(f"   Install with: ollama pull {MODEL_NAME}")
                 return False
             
             return True

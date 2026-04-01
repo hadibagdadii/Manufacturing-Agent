@@ -332,7 +332,7 @@ Return ONLY this JSON, no explanation:
         stats = self.tools.get_statistics()
         print(f"\nDatabase Statistics:")
         print(f"  Products: {stats['products']}")
-        print(f"  Components: {stats['components']}")
+        print(f"  Component Serials: {stats['component_serials']}")
         print(f"  Clients: {stats['clients']}")
         
         return final_state
