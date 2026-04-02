@@ -96,16 +96,16 @@ class ManufacturingDataAgent:
     
     def plan_step(self, state: AgentState) -> AgentState:
         """Initial planning step - SIMPLIFIED (no LLM call needed)"""
-        logger.info("📋 Plan: Extract manufacturing data from TP*.xlsx files in 1.0_Lam folder")
+        logger.info("[PLAN] Plan: Extract manufacturing data from TP*.xlsx files in 1.0_Lam folder")
         state['status'] = 'planning_complete'
         return state
     
     def get_files_step(self, state: AgentState) -> AgentState:
         """Get list of files to process"""
-        logger.info("📁 AGENT: Discovering Excel files...")
+        logger.info("[FILES] AGENT: Discovering Excel files...")
         
         files = self.tools.list_excel_files(max_files=100)
-        logger.info(f"✓ Found {len(files)} files to process")
+        logger.info(f"[OK] Found {len(files)} files to process")
         
         state['files_to_process'] = files
         state['processed_count'] = 0
@@ -125,23 +125,30 @@ class ManufacturingDataAgent:
         current_file = state['files_to_process'][state['processed_count']]
         state['current_file'] = current_file
         
-        logger.info(f"🔍 [{state['processed_count']+1}/{len(state['files_to_process'])}] {current_file['filename']}")
+        logger.info(f" [{state['processed_count']+1}/{len(state['files_to_process'])}] {current_file['filename']}")
         
+        # Skip if already successfully processed in a previous run
+        if self.tools.is_already_processed(current_file['path']):
+            logger.info(f"   [SKIP] Already processed, skipping.")
+            state['processed_count'] += 1
+            state['status'] = 'skipped'
+            return state
+
         # Read file structure
         structure = self.tools.read_excel_structure(current_file['path'])
         state['file_structure'] = structure
         
         if structure['status'] == 'error':
-            logger.warning(f"   ❌ Could not read file: {structure.get('error')}")
+            logger.warning(f"   [ERROR] Could not read file: {structure.get('error')}")
             state['status'] = 'file_error'
             return state
         
         if structure['status'] == 'no_all_data_sheet':
-            logger.warning(f"   ⚠️  No 'all data' sheet. Available: {structure['available_sheets']}")
+            logger.warning(f"   [WARNING]  No 'all data' sheet. Available: {structure['available_sheets']}")
             # Try first sheet
             first_sheet = structure['available_sheets'][0] if structure['available_sheets'] else None
             if first_sheet:
-                logger.info(f"   🔄 Trying sheet: {first_sheet}")
+                logger.info(f"   [RETRY] Trying sheet: {first_sheet}")
                 structure = self.tools.read_excel_structure(current_file['path'], sheet_name=first_sheet)
                 state['file_structure'] = structure
                 if structure['status'] == 'error':
@@ -205,13 +212,13 @@ Return ONLY this JSON, no explanation:
             state['extraction_plan'] = extraction_plan
             state['status'] = 'ready_to_extract'
             
-            logger.info(f"   ✓ Extraction plan received:")
+            logger.info(f"   [OK] Extraction plan received:")
             logger.info(f"      Part Number: {extraction_plan.get('part_number_column')}")
             logger.info(f"      Serial Number: {extraction_plan.get('serial_number_column')}")
             logger.info(f"      Test Operator: {extraction_plan.get('test_operator_column')}")
             
         except (json.JSONDecodeError, AttributeError) as e:
-            logger.error(f"   ❌ Failed to parse plan: {e}")
+            logger.error(f"   [ERROR] Failed to parse plan: {e}")
             logger.debug(f"      LLM response: {plan_str[:200]}")
             state['status'] = 'plan_error'
         
@@ -229,17 +236,17 @@ Return ONLY this JSON, no explanation:
             if result['status'] == 'success':
                 state['components'] = result['data']
                 state['status'] = 'extraction_complete'
-                logger.info(f"   ✓ Extracted manufacturing data")
+                logger.info(f"   [OK] Extracted manufacturing data")
             else:
                 # Truncate error message to prevent MemoryError
                 error_msg = str(result.get('error', 'Unknown error'))[:200]
-                logger.error(f"   ❌ Extraction failed: {error_msg}")
+                logger.error(f"   [ERROR] Extraction failed: {error_msg}")
                 state['status'] = 'extraction_error'
                 state['errors'].append(f"{state['current_file']['filename']}: {error_msg}")
                 
         except Exception as e:
             import traceback
-            logger.error(f"   ❌ Extraction exception: {str(e)}")
+            logger.error(f"   [ERROR] Extraction exception: {str(e)}")
             logger.error(f"   Traceback: {traceback.format_exc()}")
             logger.error(f"   Extraction plan: {state['extraction_plan']}")
             state['status'] = 'extraction_error'
@@ -262,12 +269,15 @@ Return ONLY this JSON, no explanation:
         )
         
         if result['status'] == 'success':
-            logger.info(f"   💾 Saved!")
+            logger.info(f"   [SAVED] Saved!")
             state['processed_count'] += 1
             state['success_count'] += 1
             state['status'] = 'saved'
+        elif result['status'] == 'skipped':
+            state['processed_count'] += 1
+            state['status'] = 'saved'
         else:
-            logger.error(f"   ❌ Save failed: {result.get('error')}")
+            logger.error(f"   [ERROR] Save failed: {result.get('error')}")
             state['errors'].append(f"{state['current_file']['serial']}: {result.get('error')}")
             state['processed_count'] += 1
         
@@ -278,7 +288,7 @@ Return ONLY this JSON, no explanation:
         
         # Just log error, don't accumulate in state (prevents MemoryError)
         error_msg = f"{state['current_file']['filename']}: {state['status']}"
-        logger.warning(f"   ⚠️ Skipping: {error_msg}")
+        logger.warning(f"   [WARNING] Skipping: {error_msg}")
         
         # Move to next file
         state['processed_count'] += 1
@@ -294,6 +304,8 @@ Return ONLY this JSON, no explanation:
             return 'extract'
         elif state['status'] in ['file_error', 'plan_error', 'extraction_error']:
             return 'error'
+        elif state['status'] == 'skipped':
+            return 'next_file'
         else:
             return 'next_file'
     
@@ -322,7 +334,7 @@ Return ONLY this JSON, no explanation:
         )
         
         print("\n" + "="*70)
-        print("🦞 LIGHTWEIGHT AGENTIC DATA EXTRACTOR")
+        print("[*] LIGHTWEIGHT AGENTIC DATA EXTRACTOR")
         print("="*70)
         
         try:
@@ -334,8 +346,8 @@ Return ONLY this JSON, no explanation:
         print("\n" + "="*70)
         print("EXTRACTION COMPLETE")
         print("="*70)
-        print(f"✓ Successfully processed: {final_state['success_count']} files")
-        print(f"❌ Errors: {final_state.get('error_count', 0)} files")
+        print(f"[OK] Successfully processed: {final_state['success_count']} files")
+        print(f"[ERROR] Errors: {final_state.get('error_count', 0)} files")
         
         # Show statistics
         stats = self.tools.get_statistics()

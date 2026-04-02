@@ -26,7 +26,7 @@ def check_ollama():
             models = data.get('models', [])
             model_names = [m.get('name', '') for m in models]
             
-            print("✓ Ollama is running")
+            print("[OK] Ollama is running")
             print(f"  Available models: {', '.join(model_names)}")
             
             # Check if the configured model is available
@@ -34,28 +34,28 @@ def check_ollama():
             model_base = MODEL_NAME.split(':')[0]  # Extract base name (e.g., 'qwen2.5' from 'qwen2.5:7b')
             has_model = any(model_base in m for m in model_names)
             if not has_model:
-                print(f"\n⚠️  Warning: {MODEL_NAME} not found")
+                print(f"\n[WARNING] {MODEL_NAME} not found")
                 print(f"   Install with: ollama pull {MODEL_NAME}")
                 return False
             
             return True
         else:
-            print("❌ Ollama is not responding correctly")
+            print("[ERROR] Ollama is not responding correctly")
             return False
     except requests.exceptions.RequestException:
-        print("❌ Ollama is not running")
+        print("[ERROR] Ollama is not running")
         print("   Start it with: ollama serve")
         print("   Or download from: https://ollama.com")
         return False
 
 
 def main():
-    print("""
-    ╔════════════════════════════════════════════════════════════════╗
-    ║    Lightweight Agentic Manufacturing Data Extractor            ║
-    ║              100% Local • Ollama Powered                       ║
-    ╚════════════════════════════════════════════════════════════════╝
-    """)
+    print("\n")
+    print("="*70)
+    print("    Lightweight Agentic Manufacturing Data Extractor")
+    print("              100% Local - Ollama Powered")
+    print("="*70)
+    print()
     
     # Check Ollama
     if not check_ollama():
@@ -67,19 +67,19 @@ def main():
     print(f"  Model: {MODEL_NAME}")
     
     # Initialize tools
-    print("\n📦 Initializing tools...")
+    print("\n[*] Initializing tools...")
     try:
         tools = SafeTools(
             root_path=Q_DRIVE_PATH,
             db_path=DATABASE_PATH
         )
     except Exception as e:
-        print(f"❌ Error initializing tools: {e}")
+        print(f"[ERROR] Error initializing tools: {e}")
         print(f"   Make sure the path exists: {Q_DRIVE_PATH}")
         sys.exit(1)
     
     # Create agent
-    print("🤖 Creating agent...")
+    print("[*] Creating agent...")
     try:
         agent = ManufacturingDataAgent(
             tools=tools,
@@ -87,7 +87,7 @@ def main():
             base_url=OLLAMA_BASE_URL
         )
     except Exception as e:
-        print(f"❌ Error creating agent: {e}")
+        print(f"[ERROR] Error creating agent: {e}")
         sys.exit(1)
     
     # Define task
@@ -111,21 +111,21 @@ def main():
     try:
         final_state = agent.run(task)
     except KeyboardInterrupt:
-        print("\n\n⚠️  Interrupted by user")
+        print("\n\n[WARNING] Interrupted by user")
         stats = tools.get_statistics()
         print(f"\nPartial results saved:")
         print(f"  Products: {stats['products']}")
         print(f"  Component Serials: {stats['component_serials']}")
         sys.exit(0)
     except Exception as e:
-        print(f"\n❌ Unexpected error: {e}")
+        print(f"\n[ERROR] Unexpected error: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
     finally:
         tools.close()
     
-    print(f"\n✅ Extraction complete!")
+    print(f"\n[OK] Extraction complete!")
     print(f"   Database saved to: {DATABASE_PATH}")
     print(f"\nNext steps:")
     print(f"  1. Query your data: python query_db.py")

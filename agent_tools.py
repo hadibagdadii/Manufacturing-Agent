@@ -75,8 +75,17 @@ class SafeTools:
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_component_serial ON component_serials(serial_value)')
         
         self.conn.commit()
-        logger.info("✓ Database initialized")
+        logger.info("[OK] Database initialized")
     
+    def is_already_processed(self, file_path: str) -> bool:
+        """Check if a file was already successfully extracted in a previous run"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM extraction_log WHERE file_path = ? AND status = 'success'",
+            (file_path,)
+        )
+        return cursor.fetchone()[0] > 0
+
     def list_excel_files(self, max_files: int = None) -> List[Dict]:
         """
         Tool: List Excel files in directory structure
@@ -131,10 +140,10 @@ class SafeTools:
                 count += 1
                 
                 if count >= max_files:
-                    logger.info(f"✓ Reached file limit: {max_files}")
+                    logger.info(f"[OK] Reached file limit: {max_files}")
                     return files
         
-        logger.info(f"✓ Found {len(files)} TP*.xlsx/xls files (recursive search)")
+        logger.info(f"[OK] Found {len(files)} TP*.xlsx/xls files (recursive search)")
         return files
     
     def read_excel_structure(self, file_path: str, sheet_name: Optional[str] = None) -> Dict:
@@ -212,6 +221,18 @@ class SafeTools:
             
             # Helper function to get value from column
             def get_value(column_name):
+                # DEFENSIVE: Handle lists (LLM might return a list instead of string)
+                if isinstance(column_name, list):
+                    # If it's a list, try each column until we find data
+                    for col in column_name:
+                        if isinstance(col, str) and col in df.columns:
+                            for idx in range(min(10, len(df))):
+                                val = df[col].iloc[idx]
+                                if pd.notna(val) and str(val).strip() and str(val) not in ['nan', 'None', '']:
+                                    return str(val).strip()
+                    return ''  # No data found in any of the columns
+                
+                # Normal case: string column name
                 if not column_name or column_name not in df.columns:
                     return ''
                 # Try first few rows
@@ -271,7 +292,7 @@ class SafeTools:
                         
             except Exception as serial_error:
                 # Log but don't fail the whole extraction
-                logger.warning(f"   ⚠️ Error processing other_serial_columns: {serial_error}")
+                logger.warning(f"   [WARNING] Error processing other_serial_columns: {serial_error}")
                 result['other_serials'] = []
             
             return {
@@ -299,6 +320,19 @@ class SafeTools:
         Tool: Save extracted manufacturing data to database
         """
         try:
+            # Skip blank/template records — serial '0', empty, or test date '00:00:00'
+            serial_str = str(serial).strip()
+            test_date_str = str(data.get('test_date', '')).strip()
+            if serial_str in ('0', '', 'None', 'nan') or test_date_str == '00:00:00':
+                logger.info(f"   [SKIP] Blank/template record skipped (serial={serial_str}, date={test_date_str})")
+                cursor = self.conn.cursor()
+                cursor.execute(
+                    'INSERT INTO extraction_log (file_path, status, message, timestamp) VALUES (?, ?, ?, ?)',
+                    (file_path, 'skipped', f'Blank/template record: serial={serial_str}', datetime.now())
+                )
+                self.conn.commit()
+                return {'status': 'skipped', 'message': 'Blank/template record'}
+
             cursor = self.conn.cursor()
             
             # Insert/update product with all fields
