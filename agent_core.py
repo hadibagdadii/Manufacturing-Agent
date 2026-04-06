@@ -104,7 +104,7 @@ class ManufacturingDataAgent:
         """Get list of files to process"""
         logger.info("[FILES] AGENT: Discovering Excel files...")
         
-        files = self.tools.list_excel_files(max_files=100)
+        files = self.tools.list_excel_files()
         logger.info(f"[OK] Found {len(files)} files to process")
         
         state['files_to_process'] = files
