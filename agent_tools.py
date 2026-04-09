@@ -7,6 +7,9 @@ from typing import List, Dict, Optional
 import pandas as pd
 from pathlib import Path
 import sqlite3
+import os
+import re
+import fnmatch
 from datetime import datetime
 import logging
 from config import MAX_FILES_PER_RUN
@@ -78,13 +81,28 @@ class SafeTools:
         logger.info("[OK] Database initialized")
     
     def is_already_processed(self, file_path: str) -> bool:
-        """Check if a file was already successfully extracted in a previous run"""
+        """Check if a file was already successfully extracted, or permanently failed, in a previous run"""
         cursor = self.conn.cursor()
         cursor.execute(
-            "SELECT COUNT(*) FROM extraction_log WHERE file_path = ? AND status = 'success'",
+            "SELECT COUNT(*) FROM extraction_log WHERE file_path = ? AND status IN ('success', 'skipped', 'not_found')",
             (file_path,)
         )
         return cursor.fetchone()[0] > 0
+
+    def mark_not_found(self, file_path: str):
+        """Permanently record a file as not found so it is not retried on future runs"""
+        cursor = self.conn.cursor()
+        # Avoid duplicate not_found entries for the same path
+        cursor.execute(
+            "SELECT COUNT(*) FROM extraction_log WHERE file_path = ? AND status = 'not_found'",
+            (file_path,)
+        )
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                'INSERT INTO extraction_log (file_path, status, message, timestamp) VALUES (?, ?, ?, ?)',
+                (file_path, 'not_found', 'File not accessible at scan time', datetime.now())
+            )
+            self.conn.commit()
 
     def list_excel_files(self, max_files: int = None) -> List[Dict]:
         """
@@ -110,35 +128,69 @@ class SafeTools:
             return []
         
         logger.info(f"Scanning client folder: {target_client} (recursive)")
-        
-        # RECURSIVE search for all TP*.xlsx and TP*.xls files
-        for pattern in ['TP*.xlsx', 'TP*.xls']:
-            for excel_file in client_path.rglob(pattern):
-                if not excel_file.is_file():
+
+        dir_count = 0
+        patterns = ['TP*.xlsx', 'TP*.xls']
+        seen_paths = set()  # Deduplicate by resolved absolute path
+
+        for dirpath, dirnames, filenames in os.walk(str(client_path)):
+            dir_count += 1
+            if dir_count % 50 == 0:
+                logger.info(f"   Scanning... {dir_count} folders visited, {count} files found so far")
+
+            for filename in filenames:
+                if not any(fnmatch.fnmatch(filename, p) for p in patterns):
                     continue
-                
+
+                excel_file = Path(dirpath) / filename
+
                 # Get relative path from client folder
-                relative_path = excel_file.relative_to(client_path)
+                try:
+                    relative_path = excel_file.relative_to(client_path)
+                except ValueError:
+                    continue
+
                 path_parts = relative_path.parts
-                
-                # Extract model and serial from path
-                # Use parent folder as "serial" and grandparent as "model"
+
                 if len(path_parts) >= 2:
-                    model_name = path_parts[0]  # First folder under 1.0_Lam
-                    serial_name = path_parts[-2]  # Parent folder of the file
+                    model_name = path_parts[0]
+                    serial_name = path_parts[-2]
                 else:
                     model_name = "Unknown"
                     serial_name = excel_file.parent.name
-                
+
+                # Skip template/blank files early — no point sending to LLM
+                lower_name = filename.lower()
+                if '_temp' in lower_name or lower_name.endswith('_temp.xlsx') or lower_name.endswith('_temp.xls'):
+                    logger.debug(f"   [SKIP] Template file ignored: {filename}")
+                    continue
+
+                # Skip malformed filenames (e.g. TP-10003939-14-17_.xlsx — no serial after underscore)
+                if not re.search(r'TP.+_\w+', filename):
+                    logger.debug(f"   [SKIP] Malformed filename ignored: {filename}")
+                    continue
+
+                # Verify the file is actually accessible right now
+                if not excel_file.exists():
+                    logger.debug(f"   [GHOST] Indexed but not accessible, skipping: {excel_file}")
+                    continue
+
+                # Deduplicate by resolved absolute path
+                resolved = str(excel_file.resolve())
+                if resolved in seen_paths:
+                    logger.debug(f"   [DUP] Duplicate path skipped: {filename}")
+                    continue
+                seen_paths.add(resolved)
+
                 files.append({
                     'path': str(excel_file),
                     'client': target_client,
                     'model': model_name,
                     'serial': serial_name,
-                    'filename': excel_file.name
+                    'filename': filename
                 })
                 count += 1
-                
+
                 if count >= max_files:
                     logger.info(f"[OK] Reached file limit: {max_files}")
                     return files
@@ -152,6 +204,12 @@ class SafeTools:
         Looks for 'all_data' sheet (case-insensitive)
         """
         try:
+            if not os.path.exists(file_path):
+                return {
+                    'status': 'error',
+                    'error': f'File not found (may have been moved or deleted): {file_path}'
+                }
+
             xl_file = pd.ExcelFile(file_path)
             
             # If no sheet specified, try to find "all_data" sheet (case-insensitive)
@@ -203,6 +261,13 @@ class SafeTools:
         Tool: Extract manufacturing test data based on LLM's extraction plan
         """
         try:
+            # Guard: verify file is still accessible before handing to pandas
+            if not os.path.exists(file_path):
+                return {
+                    'status': 'error',
+                    'error': f'File not found (may have been moved or deleted): {file_path}'
+                }
+
             sheet_name = extraction_plan.get('sheet_name')
             df = pd.read_excel(file_path, sheet_name=sheet_name)
             

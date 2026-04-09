@@ -139,7 +139,11 @@ class ManufacturingDataAgent:
         state['file_structure'] = structure
         
         if structure['status'] == 'error':
-            logger.warning(f"   [ERROR] Could not read file: {structure.get('error')}")
+            error_msg = structure.get('error', '')
+            logger.warning(f"   [ERROR] Could not read file: {error_msg}")
+            # If the file simply doesn't exist, permanently mark it so we never retry
+            if 'not found' in error_msg.lower() or 'no such file' in error_msg.lower():
+                self.tools.mark_not_found(current_file['path'])
             state['status'] = 'file_error'
             return state
         
