@@ -165,6 +165,18 @@ class ManufacturingDataAgent:
         # DEBUG: Log what we're sending to LLM
         logger.info(f"   DEBUG - Columns found: {structure['columns'][:10]}...")  # First 10 columns
         logger.info(f"   DEBUG - Sample row 0: {structure['sample_data'][0] if structure['sample_data'] else 'No data'}")
+
+        # Early blank/template check — if Serial Number and Test date are both blank/zero,
+        # skip the Ollama call entirely and mark as skipped so it's never retried.
+        sample = structure['sample_data'][0] if structure['sample_data'] else {}
+        serial_val = str(sample.get('Serial Number', '0')).strip()
+        date_val = str(sample.get('Test date', '00:00:00')).strip()
+        if serial_val in ('0', '', 'None', 'nan') or date_val in ('00:00:00', '0', '', 'None', 'nan'):
+            logger.info(f"   [SKIP] Blank/template record detected early (serial={serial_val}, date={date_val}), skipping LLM call.")
+            self.tools.mark_skipped_template(current_file['path'])
+            state['processed_count'] += 1
+            state['status'] = 'skipped'
+            return state
         
         # Create a simpler, more direct prompt
         columns_str = ", ".join(structure['columns'][:20])  # First 20 columns
@@ -342,7 +354,14 @@ Return ONLY this JSON, no explanation:
         print("="*70)
         
         try:
-            final_state = self.graph.invoke(initial_state)
+            # Each file takes ~3 graph steps (analyze → extract → save) plus overhead.
+            # Set the limit well above MAX_FILES_PER_RUN * 5 to avoid hitting it.
+            from config import MAX_FILES_PER_RUN
+            recursion_limit = max(MAX_FILES_PER_RUN * 5, 100000)
+            final_state = self.graph.invoke(
+                initial_state,
+                config={"recursion_limit": recursion_limit}
+            )
         except Exception as e:
             logger.error(f"Agent error: {e}", exc_info=True)
             raise

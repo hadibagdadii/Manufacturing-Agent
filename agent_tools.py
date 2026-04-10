@@ -104,6 +104,20 @@ class SafeTools:
             )
             self.conn.commit()
 
+    def mark_skipped_template(self, file_path: str):
+        """Permanently record a blank/template file so it is never retried"""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM extraction_log WHERE file_path = ? AND status = 'skipped'",
+            (file_path,)
+        )
+        if cursor.fetchone()[0] == 0:
+            cursor.execute(
+                'INSERT INTO extraction_log (file_path, status, message, timestamp) VALUES (?, ?, ?, ?)',
+                (file_path, 'skipped', 'Blank/template record: serial=0 or date=00:00:00', datetime.now())
+            )
+            self.conn.commit()
+
     def list_excel_files(self, max_files: int = None) -> List[Dict]:
         """
         Tool: List Excel files in directory structure
